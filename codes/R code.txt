@@ -1,0 +1,601 @@
+——————————————————————————
+Forms processing
+library(stringr)
+library(readr)
+library(dplyr)
+setwd("F:\\2536\\宏基因组\\kraken2")
+data <- read.csv("merged_data_metaphlan_12.csv",fill=TRUE,quote="",header = T)
+
+data_filtered <- data[!grepl("t__", data$Species), ]
+data_filtered <- data_filtered[grep("s__", data_filtered$Species), ]
+extract_string <- function(x) {
+  extracted <- sub(".*s__", "s__", x)
+  return(extracted)
+}
+data_filtered$Species <- sapply(data_filtered$Species, extract_string)
+write.csv(data_filtered,"s_data_12.csv",row.names = F)
+
+
+data_filtered <- data[!grepl("s__", data$Species), ]
+data2_filtered <- data_filtered[grep("g__", data_filtered$Species), ]
+extract_string <- function(x) {
+  extracted <- sub(".*g__", "g__", x)
+  return(extracted)
+}
+data2_filtered$Species <- sapply(data2_filtered$Species, extract_string)
+write.csv(data2_filtered,"g_data_12.csv",row.names = F)
+
+
+data1 <- data[!grepl("s__", data$Species), ]
+data2 <- data1[!grepl("g__", data1$Species), ]
+data3 <- data2[!grepl("f__", data2$Species), ]
+data4 <- data3[!grepl("o__", data3$Species), ]
+data5 <- data4[!grepl("c__", data4$Species), ]
+data3_filtered <- data5[grep("p__", data5$Species), ]
+extract_string <- function(x) {
+  extracted <- sub(".*p__", "p__", x)
+  return(extracted)
+}
+data3_filtered$Species <- sapply(data3_filtered$Species, extract_string)
+write.csv(data3_filtered,"p_data_12.csv",row.names = F)
+——————————————————————————
+Dilution curves
+install.packages("vegan")
+BiocManager::install("phyloseq")
+library(ggplot2)
+library(vegan)
+library(phyloseq)
+setwd("F:\\third\\hjy\\kraken2")
+data <- read.csv("s_data_64G.csv",row.names = 1)
+data <- t(data)
+rownames(data) <- data[,1]
+data <- data[,-1]
+data <- data[, colSums(data) > 0]
+rarefied_df <- data.frame()
+for(i in 1:nrow(data)){
+  sample_data <- data[i, ]
+  rarefied <- rarefy(sample_data, sample = seq(0, sum(sample_data), by = 1000))
+  colnames(rarefied) <- gsub("N", "", colnames(rarefied))
+  
+
+  rarefied_df <- rbind(rarefied_df, data.frame(Sample = rownames(data)[i], 
+                                               Number_of_Sequences = as.numeric(colnames(rarefied)), 
+                                               Number_of_Observed_OTUs = as.numeric(rarefied)))
+}
+rarefied_df$Group <- substr(rarefied_df$Sample, 6, 9)
+plot <- ggplot(data = rarefied_df, aes(x = Number_of_Sequences, y = Number_of_Observed_OTUs, group = Sample, color = Group)) +
+  geom_line() +
+  xlab('Number of Sequences') +
+  ylab('Number of Observed OTUs') +
+  scale_x_continuous(limits = c(0, 150000)) +
+  scale_color_brewer(palette = 'Set3')
+print(plot)
+ggsave(filename = "xishi.pdf", plot = plot)  
+——————————————————————————
+Box plot 
+setwd("F:\\2536\\宏基因组\\CARD2")
+mydata = read.csv("ARGs.csv")
+mydata1 = read.csv("ARGs_FD.csv")
+library(ggplot2)
+library(ggpubr)
+library(cowplot)
+library(tidyverse)
+library(ggsci)
+p <- ggboxplot(mydata, x = "Group", y = "ARGs",
+               color = "Group", add = "jitter", size = 1, linetype = 1, palette=c("#3B6895","#EA6D20") )
+p1 <- ggboxplot(mydata1, x = "Group", y = "ARGs",
+               color = "Group", add = "jitter", size = 1, linetype = 1, palette=c("#3B6895","#EA6D20") )
+——————————————————————————
+CAZy or CARD results merged with Salmon
+library(dplyr)
+setwd("F:\\2536\\宏基因组\\CARD2\\")
+x <- read.csv("merged_salmon.csv")
+y <- read.csv("merged_CARD.csv")
+result <- inner_join(x, y, by = "Speices")
+sorted_data <- result %>%
+  select(order(names(result)))
+# 将最后一列作为行名
+rownames(sorted_data) <- sorted_data[, ncol(sorted_data)]
+# 删除最后一列
+sorted_data <- sorted_data[, -ncol(sorted_data)]
+write.csv(sorted_data, file = "result_CARD.csv", row.names = TRUE)
+sorted_data <- read.csv("result_CARD.csv",row.names = 1)
+
+# 假设 hebing 已经包含第1和第2列的数据
+hebing1 <- sorted_data[, 1:2]
+rownames(hebing1) <- NULL
+result_fd1 <- hebing1%>%
+  group_by(BM01_25d.y) %>%
+  summarize(FD = sum(BM01_25d.x))
+result_fd1 <- result_fd1[-1, ]
+result_fd1 <- result_fd1[!(result_fd1[, 1] == 0 | result_fd1[, 2] == 0), ]
+write.csv(result_fd1, file = "BM01_25d.csv", row.names = FALSE)
+
+hebing <- sorted_data[, 1:2]
+for(i in seq(3, 42, by = 2)) {
+  temp <- sorted_data[, i:(i+1)]
+  # 忽略列名，直接进行行绑定
+  hebing <- rbind(hebing, setNames(temp, names(hebing)))
+}
+hebing <- hebing[hebing[, 2] != 0, ]
+# 检查第一列的类型
+str(hebing)
+# 如果第一列是字符类型，将其转换为数值类型
+hebing[, 1] <- as.numeric(hebing[, 1])
+hebing <- hebing[hebing[, 1] != 0, ]
+rownames(hebing) <- NULL
+result_fd <- hebing%>%
+  group_by(BM01_25d.y) %>%
+  summarize(FD = sum(BM01_25d.x))
+write.csv(result_fd, file = "arg.csv", row.names = FALSE)
+
+
+# 将所有数据框放入一个列表中
+df_list <- list(result_fd1, result_fd2, result_fd3, result_fd4, result_fd5, result_fd6, result_fd7, result_fd8, result_fd9, result_fd10, 
+                result_fd11, result_fd12, result_fd13, result_fd14, result_fd15, result_fd16, result_fd17, result_fd18, result_fd19, result_fd20, result_fd21)
+
+# 合并时忽略第一列的列名，使用 Reduce 进行递归合并
+merged_df <- Reduce(function(x, y) merge(x, y, by = 1, all = TRUE), df_list)
+
+# 选择第一列作为ID列，其余数据按列绑定
+colnames(merged_df)[1] <- "ID"  # 如果需要，可以重命名第一列
+print(merged_df)
+write.csv(merged_df, file = "fd.csv", row.names = FALSE)
+
+
+hebing <- sorted_data[, 3:4]
+
+# 指定要提取的列对的索引
+#1:2
+column_pairs25d <- list(c(5, 6), c(9, 10), c(13, 14), c(17, 18), 
+                       c(21, 22), c(25, 26), c(29, 30), c(33, 34), c(35, 36), c(39, 40))
+
+#3:4
+column_pairs36d <- list(c(7, 8), c(11, 12), c(15, 16), c(19, 20), 
+                       c(23, 24), c(27, 28), c(31, 32), c(37, 38), c(41, 42))
+# 提取并依次堆叠列对
+for(pair in column_pairs36d) {
+  temp <- sorted_data[, pair]
+  # 将列名重命名为与第1、2列一致
+  colnames(temp) <- colnames(hebing)
+  # 进行行绑定
+  hebing <- rbind(hebing, temp)
+}
+hebing <- hebing[hebing[, 2] != 0, ]
+# 检查第一列的类型
+str(hebing)
+# 如果第一列是字符类型，将其转换为数值类型
+hebing[, 1] <- as.numeric(hebing[, 1])
+hebing <- hebing[hebing[, 1] != 0, ]
+rownames(hebing) <- NULL
+result_fd <- hebing%>%
+  group_by(BM01_36d.1) %>%
+  summarize(FD = sum(BM01_36d))
+write.csv(result_fd, file = "arg36d.csv", row.names = FALSE)
+
+
+setwd("F:\\2536\\宏基因组\\CARD2\\")
+x <- read.csv("class25d.csv")
+y <- read.csv("class36d.csv")
+result_fd <- x%>%
+  group_by(arg) %>%
+  summarize(FD = sum(fd))
+write.csv(result_fd, file = "classsum25d.csv", row.names = FALSE)
+——————————————————————————
+Consolidation of data
+fd <- read.csv("fd.csv")
+result_FD <- fd %>%
+  mutate(GroupName = gsub("[0-9_]", "", MK)) %>%
+  group_by(GroupName) %>%
+  summarize(SumValue = sum(FD))
+resultFD <- fd %>%
+  group_by(ARG) %>%
+  summarize(SumValue = sum(FD))
+write.csv(resultFD, file = "resultFD.csv", row.names = FALSE)
+——————————————————————————
+Kruskal-Wallis
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(rstatix)
+library(ggpubr)
+setwd("F:/2536/宏基因组/CARD2")
+df = read.csv("fdmerge1.csv",header = TRUE) 
+modules <- df %>% select(-sample, -group)
+wilcox_result <- apply(modules, 2, function(module) {
+  wilcox.test(module ~ df$group)
+})
+
+significant_modules <- names(which(sapply(wilcox_result, function(x) x$p.value < 0.05)))
+print(significant_modules)
+num_significant_modules <- length(significant_modules)
+
+results_df <- data.frame(Module = character(), P_Value = numeric(), stringsAsFactors = FALSE)
+
+for (module_name in names(wilcox_result)) {
+  p_value <- wilcox_result[[module_name]]$p.value
+  if (!is.na(p_value) && p_value < 0.01) {
+    result_entry <- data.frame(Module = module_name, P_Value = p_value, stringsAsFactors = FALSE)
+    results_df <- rbind(results_df, result_entry)
+  }
+}
+print(results_df)
+
+results_df$Adjusted_P_Value <- p.adjust(results_df$P_Value, method = "fdr")
+
+significant_modules <- results_df[results_df$Adjusted_P_Value < 0.01, ]
+print(significant_modules)
+nrow(significant_modules)
+first_column <- significant_modules[, 1]
+print(first_column)
+print(results_df)
+nrow(results_df)
+write.csv(significant_modules, file = "significant_modules.csv", row.names = FALSE)
+——————————————————————————
+Correlation
+library(psych)
+setwd("F:\\2536\\宏基因组\\CARD2\\cor\\")
+dems <- read.csv("bacteria.csv", row.names = 1)
+degs <- read.csv("args.csv", row.names = 1)
+dems <- scale(dems, center = TRUE, scale = TRUE)
+degs <- scale(degs, center = TRUE, scale = TRUE)
+write.csv(dems, file = "dems_scale.csv")
+write.csv(degs, file = "degs_scale.csv")
+cor.result <- corr.test(dems,degs,method = "pearson", adjust = "fdr") 
+r <- cor.result$r
+r
+p <- cor.result$p.adj
+p.adj <- cor.result$p.adj
+p
+write.csv(r,"correlation_ba.csv")
+write.csv(p,"pvalue_ba.csv")
+alpha <- 0.01
+cor_matrix <- cor.result$r
+p_value_matrix <- cor.result$p.adj
+rownames <- rownames(cor_matrix)
+colnames <- colnames(cor_matrix)
+significant_cor_p <- data.frame(Var1 = character(), Var2 = character(), Correlation = numeric(), P_Value = numeric(), stringsAsFactors = FALSE)
+for (i in seq_along(rownames)) {
+  for (j in seq_along(colnames)) {
+    p_value <- cor.result$p.adj[i, j]  # 使用调整后的 p 值
+    if (p_value < alpha) {
+      significant_cor_p <- rbind(significant_cor_p, data.frame(
+        Var1 = rownames[i],
+        Var2 = colnames[j],
+        Correlation = cor_matrix[i, j],
+        P_Value = p_value
+      ))
+    }
+  }
+}
+print(significant_cor_p)
+write.csv(significant_cor_p,"psord0.01.csv")
+
+library(ggplot2)
+library(reshape2)
+setwd("F:\\2536\\cor")
+df<- read.csv("significant_cor_p_mb.csv")
+
+df$SignificanceLabel <- ifelse(df$Significance < 0.001, '***',
+                               ifelse(df$Significance < 0.01, '**',
+                                      ifelse(df$Significance < 0.05, '*', '')))
+
+df_melted <- melt(df, id.vars = c('Metabolite', 'Bacteria'), variable.name = 'Variable', value.name = 'Value')
+
+cor_p <- ggplot(df, aes(x =Bacteria, y = Metabolite, fill = Correlation)) +
+  geom_tile() + 
+  geom_text(aes(label = SignificanceLabel), vjust = 0.65, hjust = 0.55) + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) +
+  theme_minimal() +
+  xlab("Bacteria") +  
+  ylab("Metabolite") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black"), 
+        axis.text.y = element_text(size = 8, color = "black"))
+cor_p
+ggsave(filename = "cor_p_mg_730.pdf", plot = cor_p)
+
+——————————————————————————
+FPKMs and TPMs
+setwd("F:\\2536\\zl")
+raw_df <- read.table(file = "fcounts_2536t" , header = T,sep = "\t")
+count_df <- raw_df[ ,c(1,8:ncol(raw_df))]
+metadata <- raw_df[ ,1:7] 
+rownames(count_df) <- as.character(raw_df[,1])
+colnames(count_df)[-1] <- c("BM01_25d","BM01_36d","BM02_25d","BM02_36d","BM03_25d","BM03_36d","BM04_36d","BM05_25d","BM05_36d","BM06_25d","BM06_36d","BM07_25d","BM07_36d","BM08_25d","BM08_36d","BM09_25d","BM09_36d","BM10_25d","BM10_36d","BM11_25d","BM11_36d","BM12_25d","BM12_36d")
+count_df <- count_df[,-1]
+countToFpkm <- function(counts, effLen)
+{
+  N <- colSums(counts)
+  exp( log(counts) + log(1e9) - log(effLen) - log(N) )
+}
+options(scipen = 200)
+fpkms = countToFpkm(count_df, metadata$Length)
+View(fpkms)
+# FPKM > 0 in at least one sample
+count_df.filter <- count_df[rowSums(fpkms)>0,]
+write.table(count_df.filter,file="RNA_counts.txt", sep="\t",quote=F)
+fpkms.filter <- fpkms[rowSums(fpkms)>0,]
+write.table(fpkms.filter,file="RNA_fpkms.txt", sep="\t",quote=F)
+fpkmToTpm <- function(fpkm){exp(log(fpkm)-log(sum(fpkm))+log(1e6))}
+tpms <- apply(fpkms,2,fpkmToTpm)
+tpms.filter <- tpms[rowSums(tpms)>0,]
+write.table(tpms.filter,file="RNA_tpms.txt", sep="\t",quote=F)
+——————————————————————————
+esembl_gene_id' to 'external_gene_name'
+setwd("F:\\third\\zl")
+exp <- read.table(file = "RNA_counts_sorted.txt" , header = T,sep = "\t")
+library(biomaRt)
+library(dplyr)
+mart<-useMart("ensembl")
+data=listDatasets(mart)
+data2=useDataset("sscrofa_gene_ensembl",mart=mart)
+listFilters(data2) %>% View()
+
+transcript_id <- rownames(exp)
+# write.table(transcript_id,file = "transcript_id.txt",quote = F,sep = ",",col.names = F,row.names = F)
+# magic needed
+# annos <- read.table("annos.txt",sep = ",",header = F)
+listAttributes(mart = data2)
+
+annos <- getBM(attributes=c('ensembl_gene_id','external_gene_name'),
+                filters = 'ensembl_gene_id', values = exp$gene_id,
+                mart = data2)
+write.table(annos, 'annos_counts.txt', sep = '\t', col.names = NA, quote = FALSE)
+
+# 读入数据，但不设置 row.names
+df <- read.csv("RNA_tpms_sorted.csv", stringsAsFactors = FALSE)
+
+# 如果第一列是实际的行名，将它从数据中提取出来
+df$RowNames <- df[, 1]  # 假设第一列是行名
+df <- df[, -1]  # 删除原来的行名列
+
+# 打印前几行数据，确认是否正确
+head(df)
+# 对行名相同的行进行求和
+df_summed <- rowsum(df[, -ncol(df)], group = df$RowNames)
+
+# 打印结果
+print(df_summed)
+# 将结果转换为数据框
+df_summed <- as.data.frame(df_summed)
+
+write.csv(df_summed, file = "RNA_tpms_sum.csv")
+——————————————————————————
+WGCNA
+library(WGCNA)
+library(reshape2)
+library(stringr)
+setwd("F:\\third\\zl\\hub")
+datExpr <-read.csv("rawdata1.csv",sep = ',' ,header = T,row.names = 1)
+datTraits <-read.csv("group.csv",sep = ',' ,header = T,row.names = 1)
+# 过滤低方差基因
+library(matrixStats)
+datExpr <- as.matrix(datExpr)  # 将 datExpr 转换为矩阵
+geneVariance <- rowVars(datExpr)  # 计算每个基因的方差
+datExpr <- datExpr[geneVariance > quantile(geneVariance, 0.25), ]  # 保留方差最高的前75%基因
+datExpr <- as.data.frame(datExpr) 
+datExpr <- as.data.frame(t(datExpr))  # 对数据框进行转置并转换为数据框
+
+dim(datExpr)
+dim(datTraits) 
+gsg = goodSamplesGenes(datExpr,verbose = 3)
+gsg$allOK
+sampleTree = hclust(dist(datExpr), method = "average")
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="")
+
+
+powers = c(c(1:10), seq(from = 11, to=30, by=2))
+sft = pickSoftThreshold(datExpr, powerVector = powers,verbose = 5) 
+sizeGrWindow(9, 5)  
+par(mfrow = c(1,2))  
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab = "Soft Threshold (power)",ylab = "Scale Free Topology Model Fit,signed R^2",type = "n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels = powers,cex = cex1,col = "red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h = 0.85,col = "red")
+plot(sft$fitIndices[,1], sft$fitIndices[,5],  
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",  
+     main = paste("Mean connectivity"))  
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red") 
+power = sft$powerEstimate
+power
+datExpr <- as.data.frame(lapply(datExpr, as.numeric))
+net = blockwiseModules(datExpr, power = power,  
+                       TOMType = "unsigned", minModuleSize = 30,  
+                       reassignThreshold = 0, mergeCutHeight = 0.25,  
+                       numericLabels = TRUE, pamRespectsDendro = FALSE,  
+                       saveTOMs = TRUE,  
+                       saveTOMFileBase = "pandaTOM",  
+                       verbose = 3) 
+table(net$colors)
+sizeGrWindow(12, 9)
+mergedColors = labels2colors(net$colors)
+plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+moduleLabels = net$colors
+moduleColors = labels2colors(net$colors)
+MEs = net$MEs;
+geneTree = net$dendrograms[[1]];
+save(MEs, moduleLabels, moduleColors, geneTree,
+     file = "FemaleLiver-02-networkConstruction-auto.RData")
+
+MEs_col <- net$MEs
+colnames(MEs_col) <- paste0("ME", labels2colors(
+  as.numeric(str_replace_all(colnames(MEs_col),"ME",""))))
+MEs_col <- orderMEs(MEs_col)
+pdf("Eigengene adjacency heatmap2.pdf", width = 10, height = 12, pointsize = 12)
+plotEigengeneNetworks(
+  MEs_col,
+  "Eigengene adjacency heatmap",
+  marDendro = c(3, 3, 2, 4),
+  marHeatmap = c(3, 4, 2, 2),
+  plotDendrograms = T,
+  xLabelsAngle = 90)
+dev.off()
+load(net$TOMFiles[1], verbose=T)
+TOM <- as.matrix(TOM)
+dissTOM <- 1-TOM
+plotTOM <- dissTOM^7
+diag(plotTOM) <- NA
+pdf("Tomplot2.pdf", width = 10, height = 12, pointsize = 12)
+TOMplot(
+  plotTOM, 
+  net$dendrograms[[1]], 
+  moduleColors[net$blockGenes[[1]]],
+  main = "Network heatmap plot, all genes"
+)
+dev.off()
+file <- "BRCA.net"
+genes <- names(net$colors[net$blockGenes[[1]]])
+dimnames(TOM) <- list(genes, genes)
+cyt <- exportNetworkToCytoscape(
+  TOM,
+  edgeFile = paste0(file, ".edges.txt"),
+  nodeFile = paste0(file, ".nodes.txt"),
+  weighted = TRUE,
+  threshold = 0,
+  nodeNames = genes,
+  nodeAttr = moduleColors[net$blockGenes[[1]]]
+)
+save(net, file = "BRCA.net.rda")
+datTraits <-read.csv("group.csv",sep = ',' ,header = T,row.names = 1)
+nGenes = ncol(datExpr)
+nSamples = nrow(datExpr)
+rownames(MEs_col) <- substr(rownames(MEs_col), 1, 12)
+design <- model.matrix(~0 + datTraits$group)
+colnames(design) <-c("25d","36d")
+dimnames(design) <- list(datTraits$Name, sort(unique(datTraits$group)))
+modTraitCor <- cor(MEs_col, design, use = "p")
+dim("dataTraits")
+modTraitP <- corPvalueStudent(modTraitCor, nSamples)
+modTraitCor
+modTraitP
+plotEigengeneNetworks(MEs_col, "Eigengene adjacency heatmap",
+                      marDendro = c(6,6,6,6),
+                      marHeatmap = c(6,6,6,6), plotDendrograms = T,
+                      xLabelsAngle = 70)
+textMatrix <- paste0(signif(modTraitCor, 2), "\n(", signif(modTraitP, 1), ")")
+dim(textMatrix) <- dim(modTraitCor)
+pdf("heatplot_output2.pdf", width = 10, height = 14, pointsize = 12)
+heatplot <- labeledHeatmap(
+  Matrix = modTraitCor,
+  xLabels = colnames(design),
+  yLabels = colnames(MEs_col),
+  cex.lab = 0.8,
+  ySymbols = colnames(MEs_col),
+  colorLabels = FALSE,
+  colors = blueWhiteRed(50),
+  textMatrix = textMatrix,
+  setStdMargins = TRUE,
+  cex.text = 0.8,
+  zlim = c(-1, 1),
+  main = paste("Module-trait relationships")
+)
+dev.off()
+moduleLabels = net$colors
+moduleColors = labels2colors(net$colors)
+table(moduleColors)
+MEs = net$MEs;
+geneTree = net$dendrograms[[1]];
+write.table(moduleColors,file='moduleColors.txt',sep='\t')
+group = as.data.frame(datTraits$group)
+names(group) = "group"
+modNames = substring(names(MEs), 3)
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"))
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership 
+), nSamples))
+names(geneModuleMembership) = paste("MM", modNames, sep="")
+names(MMPvalue) = paste("p.MM", modNames, sep="")
+geneTraitSignificance = as.data.frame(cor(datExpr, design, use = "p"))
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), 
+                                          nSamples))
+names(geneTraitSignificance) = paste("GS.", names(group), sep="")
+names(GSPvalue) = paste("p.GS.", names(group), sep="")
+datKME=signedKME(datExpr, MEs, outputColumnName="kME_MM.")#????MM??
+GS=cor(datExpr,design,use="p")
+datKME = signedKME(
+  datExpr,
+  MEs,
+  outputColumnName="MM.")
+datKME
+FilterGenes= abs(GS)> 0.6 & abs(datKME$MM.2)>0.6
+write.csv(FilterGenes,"blue2.csv")
+——————————————————————————
+PCA
+library(factoextra)
+library(FactoMineR)
+setwd("F:\\2536\\zl")
+data1 <- read.csv("RNA_tpms_sum.csv", row.names = 1)
+group <- read.csv("group.csv", row.names = 1)
+transposed_data <- t(data1)
+
+data1 <- as.data.frame(transposed_data)
+res.pca <- prcomp(data1,  scale = TRUE)
+res.pca
+fviz_screeplot(res.pca, addlabels = TRUE)
+fviz_pca_ind(res.pca, col.ind="cos2", 
+             geom = "point", # show points only
+             gradient.cols = c("white", "#2E9FDF", "#FC4E07" ))
+pca_plot <- fviz_pca_ind(res.pca, label="none", habillage=group$group,
+                         addEllipses=TRUE, ellipse.level=0.95,
+                         palette = c("#E69F00", "#56B4E9"))
+ggsave(filename = "PCA.png", plot = pca_plot, dpi = 900)
+
+install.packages("pheatmap")
+library(pheatmap)
+# 按分组信息排序列
+ordered_indices <- order(group$group)
+data1 <- data1[, ordered_indices]
+group <- group[ordered_indices, , drop = FALSE]
+
+p4.2 <- pheatmap(data1, 
+                 scale = "row", 
+                 show_colnames = FALSE, 
+                 show_rownames = FALSE, 
+                 cluster_cols = FALSE,  # 启用列的聚类
+                 annotation_col = group, 
+                 main = "mRNA Heatmap")
+
+# 显示热图
+print(p4.2)
+
+ggsave(filename = "PCA.pdf", plot = p4.2)
+pdf("mRNA_Heatmap.pdf", width = 8, height = 6)
+dev.off()
+p1 <- pheatmap(data1,scale = "row",
+               border = "white",
+               cluster_cols = T, 
+               cluster_rows = T,
+               annotation_col = group,
+               clustering_distance_rows = "correlation",
+               clustering_method="ward.D2",show_rownames = F) 
+——————————————————————————
+Volcano
+setwd("F:\\2536\\转录组")
+mdata <- read.csv("total_mRNA.csv")
+library(ggplot2)
+mdata$neglogpvalue <- -log10(mdata$FDR)
+
+color_palette <- c("#0000ff","#b9bbbe","#ff3333")
+ggplot(mdata, aes(x = logFC, y = neglogpvalue, color = significant)) +
+  geom_point(size = 2, alpha = 5, shape = 20) +
+  labs(x = "logFC", y = "-log10(FDR)" ,color = "significant")+
+  scale_color_manual(values = color_palette)+
+  ggtitle("Volcano Plot of DEG(mRNA)") +
+  theme_bw()+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  theme(axis.title.x = element_text(face = "bold", size = 12, colour = "black",hjust = 0.5),
+        axis.title.y = element_text(face = "bold", size = 12, colour = "black",hjust = 0.5),
+        axis.text.x = element_text(face = "bold", size = 12,colour = "black",angle = 0,hjust=0.5),
+        axis.text.y = element_text(face = "bold", size = 12, colour = "black"),
+        legend.text = element_text(face = "bold",size=12,colour = "black"),
+        legend.title = element_text(face = "bold", size = 14, color = "black",hjust = 0.1),
+        plot.title = element_text(face = "bold", size = 14, color = "black", hjust = 0.5))+
+  geom_hline(yintercept = -log10(0.05), linetype = 4, color = "black") +
+  geom_vline(xintercept = c(-1.5,1.5), linetype = 4, color = "black")

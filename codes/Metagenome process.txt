@@ -1,0 +1,250 @@
+Metagenome process
+————————————————
+FastQC
+cd spider_data/mw/pig/fastqc1
+vim work.sh
+for i in /home/mw/spider/pig/rawdata/*_1_clean.fq.gz
+do
+name=${i%_1_clean.fq.gz}
+fastqc -f fastq -o /spider_data/mw/pig/fastqc1  -t 10 ${name}_1_clean.fq.gz ${name}_2_clean.fq.gz
+done
+qsub -l h=spider -S /bin/bash work.sh
+vim work2.sh
+conda activate multiqc
+multiqc /spider_data/mw/pig/fastqc1/
+qsub -l h=spider -S /bin/bash work2.sh
+————————————————
+Bowtie2
+vim work.sh
+for i in /home/mw/spider/pig/rawdata/*_1_clean.fq.gz
+do
+name=${i%_1_clean.fq.gz}
+bowtie2 -p 10 -x Sus_scrofa -1 ${name}_1_clean.fq.gz -2 ${name}_2_clean.fq.gz --un-conc ${name}_bowtie2.fastq
+done
+qsub -l h=spider -S /bin/bash work.sh
+vim work2.sh
+for i in /spider_data/mw/pig/bowtie2/*bowtie2.1.fastq
+do
+name=${i%_bowtie2.1.fastq}
+cat ${name}_bowtie2.1.fastq ${name}_bowtie2.2.fastq > ${name}_pair.fastq
+done
+qsub -l h=sturgeon -S /bin/bash work2.sh
+——————————————————————————
+Kraken2
+cd spider_data/mw/pig/kraken2
+conda activate kraken2
+v=k2_pluspf_20240112
+mkdir pluspf
+wget -c ftp://download.nmdc.cn/tools/meta/kraken2/${v}.tar.gz
+tar xvzf ${v}.tar.gz -C pluspf
+vim work.sh
+for i in /spider_data/mw/pig/bowtie2/*_bowtie2.1.fastq
+do
+name=${i%_bowtie2.1.fastq}
+kraken2 --threads 10 --use-mpa-style --report ${name}.txt --db /spider_data/mw/pig/kraken2/minikraken2_v1_8GB --paired ${name}_bowtie2.1.fastq ${name}_bowtie2.2.fastq
+done
+qsub -l h=spider -S /bin/bash work.sh
+————————————————————————————
+Megahit
+cd spider_data/mw/pig/megahit
+vim work.sh
+for i in /spider_data/mw/pig/bowtie2/*_bowtie2.1.fastq
+do
+name=${i%_bowtie2.1.fastq}
+megahit -t 10 -m 0.90 --min-contig-len 300 -1 ${name}_bowtie2.1.fastq -2 ${name}_bowtie2.2.fastq -o ${name}_contig_out
+done
+qsub -l h=spider -S /bin/bash work.sh
+————————————————————————————
+Prodigal
+cd spider_data/mw/pig/prodigal
+vim work2.sh
+conda activate prodigal
+for i in /spider_data/mw/pig/megahit/*_contig_out
+do
+filename=${i#/spider_data/mw/pig/megahit/}
+/home/mw/miniconda3/bin/prodigal -i $i/final.contigs.fa -o ${filename}_contig_out.fna  -a ${filename}_protein.faa -d ${filename}_nucleotide.fna -p meta
+done
+qsub -l h=spider -S /bin/bash work2.sh
+————————————————————————————
+CD-HIT
+cd spider_data/mw/pig/cdhit
+conda activate cdhit
+vim work2.sh
+for i in /spider_data/mw/pig/prodigal/180380/*_nucleotide.fna
+do
+name=${i%_nucleotide.fna}
+/home/mw/miniconda3/envs/cdhit/bin/cd-hit-est -i ${name}_nucleotide.fna -o ${name}_nr.fna -M 32000 -T 12 -c 0.95 -aS 0.9 
+done
+qsub -l h=spider -S /bin/bash work2.sh
+————————————————————————————
+Salmon
+conda activate salmon
+vim work.sh
+for i in *_nr.fna
+do
+name=${i%_nr.fna}
+/home/mw/miniconda3/envs/salmon/bin/salmon index -t ${name}_nr.fna -i ${name}_index
+done
+qsub -l h=spider -S /bin/bash work.sh
+
+vim work2.sh
+for i in *_nr.fna
+do
+name=${i%_nr.fna}
+salmon quant -i ${name}_index --libType IU -1 /spider_data/mw/pig/bowtie2/${name}_1.fastq -2 /spider_data/mw/pig/bowtie2/${name}_2.fastq -o ${name}_quant --meta  
+done
+qsub -l h=spider -S /bin/bash work2.sh
+
+vim work3.sh
+for i in /spider_data/mw/pig/salmon/*_quant
+do
+filename=${i#/spider_data/mw/pig/salmon/}
+cut -f 1,4 $i/quant.sf > ${filename}_matrix.tsv
+done
+qsub -l h=spider -S /bin/bash work3.sh
+
+mv *.tsv /spider_data/mw/pig/salmon/merge_data
+cd merge_data
+python test2.py
+————————————————————————————
+Biopython
+vim work.sh
+for i in *.fna
+do
+sed -i 's/ /hello/g' $i
+done
+
+vim work2.sh
+for i in *.fna
+do
+name=${i%.fna}
+mv $i test.txt
+python dna2AA.py > /spider_data/mw/pig/diamond/faa/$name.pro.fa
+mv test.txt $i
+done
+
+vim work3.sh
+for i in *.fna
+do
+sed -i 's/hello/ /g' $i
+done
+
+vim work.sh
+conda activate humann
+for i in /roach_data/mw/pair/*_bowtie2.1.fastq_pair.fastq
+do
+name=${i%_bowtie2.1.fastq_pair.fastq}
+time metaphlan --input_type fastq /roach_data/pair/${name}_bowtie2.1.fastq_pair.fastq \
+      /roach_data/${name}.txt --bowtie2db /db/metaphlan4 --index mpa_vOct22_CHOCOPhlAnSGB_202212 --offline \
+      --nproc 4
+done
+qsub -l h=roach -S /bin/bash work.sh
+————————————————————————————
+DIAMOND
+conda activate diamond
+CAZy
+cd /spider_data/mw/pig/diamond/CAZy
+wget --no-check-certificate https://bcb.unl.edu/dbCAN2/download/Databases/CAZyDB.07262023.fa
+/home/mw/miniconda3/envs/diamond/bin/diamond makedb --in CAZyDB.07262023.fa -d CAZy.dmnd
+vim work.sh
+for i in /spider_data/mw/pig/prodigal/*_contig_out_protein.faa
+do
+filename=${i%_contig_out_protein.faa}
+/home/mw/miniconda3/envs/diamond/bin/diamond blastp -p 10 --id 80% --query-cover 70%  -d /spider_data/mw/test/diamond/CAZy/CAZy.dmnd -q ${filename}_contig_out_protein.faa -o ${filename}_result.m8 --max-target-seqs 1
+done
+qsub -l h=spider -S /bin/bash work.sh
+
+vim work2.sh
+for i in *_result.m8
+do
+name=${i%_result.m8}
+sed 's/|/ /g' ${name}_result.m8 > ${name}_result1.txt
+done
+qsub -l h=spider -S /bin/bash work2.sh
+
+vim work3.sh
+for i in *_result1.txt
+do
+name=${i%_result1.txt}
+awk '{print $1, $3}' ${name}_result1.txt  > ${name}_output.txt
+done
+qsub -l h=spider -S /bin/bash work3.sh
+mv *_output.txt /spider_data/mw/pig/diamond/CAZy2/merge_data
+cd merge_data
+vim work.sh
+for i in *.txt
+do
+sed -i 's/ /\t/g' $i
+done
+qsub -l h=spider -S /bin/bash work.sh
+vim test3.py
+for i in *.txt
+do
+sed -i 's/ /\t/g' $i
+done
+vim test3.py
+import os
+input_folder = '/spider_data/mw/pig/diamond/CAZy2/merge_data'
+output_file = 'merged_species_data.csv'
+# Get a list of input files
+input_files = [os.path.splitext(f)[0] for f in os.listdir(input_folder) if f.endswith('.txt')]
+# Dictionary to store species data
+species_data = {}
+all_species = set()
+# Process each input file
+for filename in input_files:
+    file_path = os.path.join(input_folder, filename + '.txt')
+    with open(file_path, 'r') as file:
+        for line in file:
+            columns = line.strip().split('\t')
+            if len(columns) == 2:
+                species_name, value = columns
+                # Check if the value is numeric
+                if value.replace('.', '', 1).isdigit():
+                    float_value = float(value)
+                else:
+                    # If not numeric, treat it as a string
+                    float_value = value
+                species_data.setdefault(species_name, ['0'] * len(input_files))
+                species_data[species_name][input_files.index(filename)] = float_value
+                all_species.add(species_name)
+# Write the output to a CSV file
+with open(output_file, 'w') as output:
+    output.write('Species,' + ','.join(input_files) + '\n')
+    for species_name in all_species:
+        values = [str(val) for val in species_data[species_name]]
+        output.write(species_name + ',' + ','.join(values) + '\n')
+python test3.py
+
+CARD
+/home/mw/miniconda3/envs/diamond/bin/diamond makedb --in protein_fasta_protein_homolog_model.fasta -d CARD.dmnd
+vim work.sh
+for i in * /spider_data/mw/pig/prodigal/_contig_out_protein.faa
+do
+filename=${i%_contig_out_protein.faa}
+/home/mw/miniconda3/envs/diamond/bin/diamond blastp -p 10 --id 90% --query-cover 90%  -d /spider_data/mw/pig/diamond/CARD/CARD.dmnd -q ${filename}_contig_out_protein.faa -o ${filename}_CARD.m8 --max-target-seqs 1
+done
+qsub -l h=spider -S /bin/bash work.sh
+
+/home/mw/miniconda3/envs/humann/lib/python3.12/site-packages/metaphlan
+——————————————————————————
+Humann
+cd spider_data/mw/pig/humann
+mkdir pair
+cd pair
+vim work.sh
+for i in /spider_data/mw/pig/bowtie2/*_bowtie2.1.fastq
+do
+name=${i%_bowtie2.1.fastq}
+filename=${i#/spider_data/mw/pig/bowtie2/}
+cat ${name}_bowtie2.1.fastq ${name}_bowtie2.2.fastq > /spider_data/mw/pig/humann/pair/${filename}_bowtie2.pair.fastq
+done
+qsub -l h=spider -S /bin/bash work.sh
+cd ..
+vim work.sh
+for i in /spider_data/mw/pig/humann/pair/*_bowtie2.1.fastq_pair.fastq
+do
+name=${i%_bowtie2.1.fastq_pair.fastq}
+humann --input ${name}_bowtie2.1.fastq_pair.fastq --output /spider_data/mw/pig/humann/${name} --nucleotide-database /spider_data/mw/pig/humann/chocophlan --protein-database /spider_data/mw/pig/humann/uniref --remove-temp-output --metaphlan /home/mw/miniconda3/envs/mpa/bin/metaphlan --threads 10
+done
+qsub -l h=spider -S /bin/bash work.sh

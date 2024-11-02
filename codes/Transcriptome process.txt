@@ -1,0 +1,89 @@
+Transcriptome process
+————————————————
+FastQC
+cd /spider_data/mw/zl/2536/fastqc1/
+vim work.sh
+for i in /spider_data/mw/zl/2536/rawdata/*.R1.fastq.gz
+do
+name=${i%.R1.fastq.gz}
+fastqc -f fastq -o /spider_data/mw/pig/fastqc1  -t 10 ${name}.R1.fastq.gz ${name}.R2.fastq.gz
+done
+qsub -l h=spider -S /bin/bash work.sh
+————————————————————————
+NGSQCToolkit
+cd /spider_data/mw/zl/2536/NGSQCT/
+conca create -n NGSQC
+conda activate NGSQC
+conda install -c conda-forge git
+git clone https://github.com/mjain-lab/NGSQCToolkit
+mv NGSQCToolkit /home/mw/biosoft/
+cd /home/mw/biosoft/NGSQCToolkit/QC/
+chmod 755 IlluQC_PRLL.pl
+cd /spider_data/mw/zl/2536/NGSQCT/
+conda activate NGSQC
+conda install -n NGSQC gcc_linux-64 gxx_linux-64
+cpan local::lib
+export PERL_MB_OPT="--install_base '$HOME/perl5'"
+export PERL_MM_OPT="INSTALL_BASE=$HOME/perl5"
+export PERL5LIB="$HOME/perl5/lib/perl5:$PERL5LIB"
+export PATH="$HOME/perl5/bin:$PATH"
+source ~/.bashrc
+conda activate NGSQC
+cpan String::Approx
+perl IlluQC_PRLL.pl
+vim work.sh
+conda activate NGSQC
+for i in /spider_data/mw/zl/2536/rawdata/*.R1.fastq.gz
+do
+name=${i%.R1.fastq.gz}
+home/mw/biosoft/NGSQCToolkit/QC/IlluQC_PRLL.pl -pe ${name}.R1.fastq.gz ${name}.R2.fastq.gz 2 5 -z g -o /spider_data/mw/zl/2536/NGSQCT
+done
+qsub -l h=spider -S /bin/bash work.sh
+————————————————————————
+Hisat2
+cd /spider_data/mw/zl/2536/hisat2/
+conda create -n Hisat2
+conda activate Hisat2
+conda install -c bioconda hisat2=2.1.0
+wget "https://ftp.ensembl.org/pub/release-111/fasta/sus_scrofa/dna/Sus_scrofa.Sscrofa11.1.dna.toplevel.fa.gz"
+vim work.sh
+conda activate Hisat2
+hisat2-build -p 12 Sus_scrofa.Sscrofa11.1.dna.toplevel.fa.gz pigindex
+for i in /spider_data/mw/zl/2536/rawdata/*.R1.fastq.gz
+do
+name=${i%.R1.fastq.gz}
+hisat2 -p 10 -x pigindex -1 ${name}.R1.fastq.gz -2 ${name}.R2.fastq.gz -S ${name}.sam
+done
+qsub -l h=spider -S /bin/bash work.sh
+————————————————————————
+.sam to .bam
+cd /spider_data/mw/zl/2536/hisat2/
+vim work4.sh
+conda activate samtools
+for i in /spider_data/mw/zl/2536/hisat2/*.sam
+do
+name=${i%.sam}
+samtools view -S ${name}.sam -b > ${name}.bam
+samtools sort ${name}.bam -o ${name}_sorted.bam
+samtools index ${name}_sorted.bam
+done
+qsub -l h=spider -S /bin/bash work.sh
+————————————————————————
+Featurecounts
+conda create -n fcounts
+conda activate fcounts
+conda install -y -c bioconda subread
+vim work2.sh
+featureCounts -T 10 -p -a /spider_data/mw/zl/2536/featurecount/Sus_scrofa.Sscrofa11.1.111.gtf -o /spider_data/mw/zl/2536/featurecount/fcounts.txt  /spider_data/mw/zl/2536/hisat2/*_sorted.bam
+qsub -l h=sturgeon -S /bin/bash work.sh
+conda activate fcounts
+conda install -y -c bioconda subread
+wget"https://ftp.ensembl.org/pub/release-111/gtf/sus_scrofa/Sus_scrofa.Sscrofa11.1.111.gtf.gz"
+unzip Sus_scrofa.Sscrofa11.1.111.gtf.gz
+vim work2.sh
+conda activate fcounts
+featureCounts -T 10 -p -t exon -g gene_id -a /spider_data/mw/zl/2536/featurecount/Sus_scrofa.Sscrofa11.1.111.gtf -o /spider_data/mw/zl/2536/featurecount/fcounts.txt /spider_data/mw/zl/180380/hisat2/*_sorted.bam
+vim work3.sh
+conda activate fcounts
+featureCounts -T 10 -p -t exon -f -g gene_id -a /spider_data/mw/zl/2536/featurecount/Sus_scrofa.Sscrofa11.1.111.gtf -o /spider_data/mw/zl/2536/featurecount/fcounts_f.txt  /spider_data/mw/zl/180380/hisat2/*_sorted.bam
+
